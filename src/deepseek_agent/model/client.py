@@ -12,10 +12,22 @@ class Message(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    message: Message
+    message: Optional[Message] = None
     done: bool
     created_at: Optional[str] = None
     model: Optional[str] = None
+    # Support for tool calls
+    tool_calls: Optional[List[Dict[str, Any]]] = None
+
+    def __init__(self, **data):
+        # Handle tool calls in message
+        if 'message' in data and isinstance(data['message'], dict):
+            if 'tool_calls' in data['message']:
+                data['tool_calls'] = data['message'].get('tool_calls')
+            # Convert message dict to Message object if needed
+            if 'role' in data['message'] and 'content' in data['message']:
+                data['message'] = Message(**data['message'])
+        super().__init__(**data)
 
 
 class DeepSeekClient:
@@ -107,7 +119,8 @@ class DeepSeekClient:
         stream: bool = True,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[ChatResponse, None]:
         """Send chat messages to DeepSeek model"""
         
@@ -128,9 +141,13 @@ class DeepSeekClient:
                 "temperature": temperature,
             }
         }
-        
+
         if max_tokens:
             request_data["options"]["num_predict"] = max_tokens
+
+        # Add tools if provided
+        if tools:
+            request_data["tools"] = tools
         
         # Send request
         async with self.client.stream(

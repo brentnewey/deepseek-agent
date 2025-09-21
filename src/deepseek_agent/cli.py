@@ -494,11 +494,17 @@ Just type any question or request to chat with DeepSeek!
 @app.command()
 def chat(
     workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    model: str = typer.Option("deepseek-v2.5", "--model", "-m", help="DeepSeek model to use")
+    model: str = typer.Option("deepseek-v2.5", "--model", "-m", help="DeepSeek model to use"),
+    tools: bool = typer.Option(False, "--tools", help="Enable tool calling (requires compatible model)")
 ):
     """Start interactive chat session with DeepSeek Agent"""
-    cli = AgentCLI(workspace, model=model)
-    asyncio.run(cli.run_interactive())
+    if tools:
+        from deepseek_agent.cli_with_tools import ToolAgentCLI
+        cli = ToolAgentCLI(workspace, model=model)
+        asyncio.run(cli.run_interactive())
+    else:
+        cli = AgentCLI(workspace, model=model)
+        asyncio.run(cli.run_interactive())
 
 
 @app.command()
