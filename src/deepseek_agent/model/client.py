@@ -159,8 +159,15 @@ class DeepSeekClient:
     ) -> AsyncGenerator[str, None]:
         """Generate code using DeepSeek"""
         
-        system_prompt = """You are an expert software engineer. Generate clean, efficient, and well-documented code.
-Focus on best practices, proper error handling, and maintainable solutions."""
+        system_prompt = """You are an expert software engineer who creates working code files.
+
+When asked to generate code:
+1. Create complete, runnable code (not just snippets)
+2. Include proper error handling and edge cases
+3. Add helpful comments explaining key parts
+4. Make the code self-contained and ready to execute
+
+Always provide the COMPLETE file content that can be saved and run immediately."""
         
         if language:
             system_prompt += f" The code should be in {language}."
