@@ -59,13 +59,13 @@ class ToolAgentCLI:
                 if not await client.check_model_availability():
                     raise RuntimeError(f"Model {self.model} is still unavailable after download.")
 
-                console.print(f"✓ {self.model} ready!", style="green")
+                console.print(f"[OK] {self.model} ready!", style="green")
             except Exception as e:
                 console.print(f"ERROR: Failed to download {self.model}: {e}", style="red")
                 await client.client.aclose()
                 raise typer.Exit(code=1)
         else:
-            console.print(f"✓ {self.model} available!", style="green")
+            console.print(f"[OK] {self.model} available!", style="green")
 
         return client
 
@@ -73,7 +73,7 @@ class ToolAgentCLI:
         """Display the result of a tool execution"""
         if tool_name == "write_file" and result.get("success"):
             file_path = result.get("file_path", "")
-            console.print(f"✓ Created file: {file_path}", style="green")
+            console.print(f"[+] Created file: {file_path}", style="green")
 
             # Offer to display the file
             if file_path.endswith(('.py', '.js', '.java', '.cpp', '.c', '.rs', '.go')):
@@ -127,7 +127,7 @@ class ToolAgentCLI:
                 except:
                     tool_args = {}
 
-            console.print(f"🔧 Executing tool: {tool_name}", style="cyan")
+            console.print(f"[TOOL] Executing: {tool_name}", style="cyan")
 
             # Execute the tool
             result = await self.tool_executor.execute(tool_name, tool_args)
@@ -177,7 +177,7 @@ Type 'quit' to exit.
         # Add user message to history
         self.conversation_history.append(Message(role="user", content=command))
 
-        console.print("🤖 DeepSeek is working...", style="blue")
+        console.print("DeepSeek is working...", style="blue")
 
         # Keep trying to get response and execute tools
         max_iterations = 5  # Prevent infinite loops
@@ -204,45 +204,37 @@ Type 'quit' to exit.
             if not response_complete or not current_response:
                 break
 
-            # Check for tool calls
+            # Check for tool calls first
+            if current_response.tool_calls:
+                # Execute tools
+                tool_responses = await self.process_tool_calls(current_response.tool_calls)
+
+                # Add tool responses to conversation
+                for tool_response in tool_responses:
+                    self.conversation_history.append(tool_response)
+
+                # Continue conversation to get final response
+                continue
+
+            # No tool calls, display the response
             message = current_response.message
-            if message:
-                # Check if there are tool calls
-                tool_calls = None
-                if hasattr(message, 'tool_calls'):
-                    tool_calls = message.tool_calls
-                elif isinstance(message, dict) and 'tool_calls' in message:
-                    tool_calls = message['tool_calls']
-
-                if tool_calls:
-                    # Execute tools
-                    tool_responses = await self.process_tool_calls(tool_calls)
-
-                    # Add tool responses to conversation
-                    for tool_response in tool_responses:
-                        self.conversation_history.append(tool_response)
-
-                    # Continue conversation to get final response
-                    continue
-
-                # No tool calls, display the response
-                if message.content:
-                    self.conversation_history.append(Message(role="assistant", content=message.content))
-                    console.print(Panel(Markdown(message.content), title="🤖 DeepSeek Response", border_style="green"))
-                break
+            if message and message.content:
+                self.conversation_history.append(Message(role="assistant", content=message.content))
+                console.print(Panel(Markdown(message.content), title="DeepSeek Response", border_style="green"))
+            break
 
         return True
 
     async def run_interactive(self):
         """Run interactive CLI session"""
         console.print(Panel.fit(
-            "🤖 DeepSeek Agent v0.2.0 - Tool Calling Edition\n"
+            "DeepSeek Agent v0.2.0 - Tool Calling Edition\n"
             f"Model: {self.model}\n"
             f"Workspace: {self.workspace}\n\n"
             "This agent can autonomously:\n"
-            "  • Create and modify files\n"
-            "  • Execute commands\n"
-            "  • Read and search files\n\n"
+            "  - Create and modify files\n"
+            "  - Execute commands\n"
+            "  - Read and search files\n\n"
             "Just describe what you want!",
             title="Welcome",
             border_style="green"
@@ -258,7 +250,7 @@ Type 'quit' to exit.
                     break
 
         except KeyboardInterrupt:
-            console.print("\n👋 Goodbye!", style="green")
+            console.print("\nGoodbye!", style="green")
         finally:
             await client.client.aclose()
 
@@ -277,7 +269,7 @@ def chat(
     model_base = model.lower().split(":")[0]
     if not any(supported in model_base for supported in models_with_tools):
         console.print(
-            f"⚠️  Warning: {model} may not support tool calling.\n"
+            f"WARNING: {model} may not support tool calling.\n"
             "Consider using: llama3.1, mistral-nemo, or firefunction-v2",
             style="yellow"
         )
