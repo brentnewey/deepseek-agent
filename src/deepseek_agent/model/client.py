@@ -74,6 +74,9 @@ class DeepSeekClient:
                     if self._matches_target_model(model_entry):
                         return True
             return False
+        except (httpx.ConnectError, httpx.TimeoutException):
+            # Ollama service not running
+            return False
         except Exception:
             return False
     
@@ -128,10 +131,10 @@ class DeepSeekClient:
         formatted_messages = []
         if system_prompt:
             formatted_messages.append({"role": "system", "content": system_prompt})
-        
+
         for msg in messages:
             formatted_messages.append({"role": msg.role, "content": msg.content})
-        
+
         # Prepare request
         request_data = {
             "model": self.model,
@@ -148,25 +151,38 @@ class DeepSeekClient:
         # Add tools if provided
         if tools:
             request_data["tools"] = tools
-        
+
         # Send request
-        async with self.client.stream(
-            "POST",
-            f"{self.host}/api/chat",
-            json=request_data
-        ) as response:
+        if stream:
+            # Streaming mode
+            async with self.client.stream(
+                "POST",
+                f"{self.host}/api/chat",
+                json=request_data
+            ) as response:
+                if response.status_code != 200:
+                    error_text = await response.aread()
+                    raise Exception(f"API error: {response.status_code} - {error_text}")
+
+                async for line in response.aiter_lines():
+                    if line.strip():
+                        try:
+                            data = json.loads(line)
+                            yield ChatResponse(**data)
+                        except Exception as e:
+                            print(f"Error parsing response: {e}")
+                            continue
+        else:
+            # Non-streaming mode - single response
+            response = await self.client.post(
+                f"{self.host}/api/chat",
+                json=request_data
+            )
             if response.status_code != 200:
-                error_text = await response.aread()
-                raise Exception(f"API error: {response.status_code} - {error_text}")
-            
-            async for line in response.aiter_lines():
-                if line.strip():
-                    try:
-                        data = json.loads(line)
-                        yield ChatResponse(**data)
-                    except Exception as e:
-                        print(f"Error parsing response: {e}")
-                        continue
+                raise Exception(f"API error: {response.status_code} - {response.text}")
+
+            data = response.json()
+            yield ChatResponse(**data)
     
     async def generate_code(
         self,

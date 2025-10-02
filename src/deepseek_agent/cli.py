@@ -16,6 +16,7 @@ from rich.spinner import Spinner
 
 from deepseek_agent.model.client import DeepSeekClient, Message
 from deepseek_agent.tools.file_ops import FileOperations
+from deepseek_agent.utils import ensure_ollama_running, get_ollama_install_instructions
 
 app = typer.Typer(help="Local coding agent powered by DeepSeek models")
 console = Console()
@@ -130,8 +131,19 @@ class AgentCLI:
 
     async def setup_model(self) -> DeepSeekClient:
         """Setup and verify DeepSeek model"""
+        # First ensure Ollama is running
+        console.print("Checking Ollama service...", style="blue")
+        success, message = await ensure_ollama_running()
+
+        if not success:
+            console.print(f"ERROR: {message}", style="red")
+            console.print(get_ollama_install_instructions(), style="yellow")
+            raise typer.Exit(code=1)
+
+        console.print(f"Ollama service ready: {message}", style="green")
+
         client = DeepSeekClient(model=self.model)
-        
+
         console.print(f"Checking {self.model} availability...", style="blue")
 
         if not await client.check_model_availability():

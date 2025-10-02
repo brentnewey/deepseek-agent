@@ -15,7 +15,7 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                     'properties': {
                         'file_path': {
                             'type': 'string',
-                            'description': 'The path to the file to create or overwrite',
+                            'description': 'The file path relative to workspace (e.g., "fizzbuzz.py" or "src/main.py"). Use just the filename for root directory files.',
                         },
                         'content': {
                             'type': 'string',
@@ -36,7 +36,7 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                     'properties': {
                         'file_path': {
                             'type': 'string',
-                            'description': 'The path to the file to read',
+                            'description': 'The file path relative to workspace (e.g., "fizzbuzz.py" or "src/main.py")',
                         },
                     },
                     'required': ['file_path'],
@@ -64,13 +64,17 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
             'type': 'function',
             'function': {
                 'name': 'run_command',
-                'description': 'Execute a shell command in the workspace',
+                'description': 'Execute a shell command or CLI tool in the workspace. Can run Python scripts, npm commands, git, or any installed CLI tool.',
                 'parameters': {
                     'type': 'object',
                     'properties': {
                         'command': {
                             'type': 'string',
-                            'description': 'The shell command to execute',
+                            'description': 'The shell command to execute (e.g., "python script.py", "npm install", "git status")',
+                        },
+                        'timeout': {
+                            'type': 'number',
+                            'description': 'Optional timeout in seconds (default: 30)',
                         },
                     },
                     'required': ['command'],
