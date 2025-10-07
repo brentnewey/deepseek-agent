@@ -62,11 +62,18 @@ class ToolAgentCLI:
             import platform
             os_info = f" You are running on {platform.system()}." if platform.system() == "Windows" else ""
             self.system_prompt = (
-                f"You are a coding assistant.{os_info} "
-                "You have access to TWO tools: write_file and run_command. "
-                "Use write_file to create files. Use run_command to execute shell commands. "
-                "DO NOT describe what to do - actually use the tools! "
-                "For run_command on Windows, use commands like: 'dir', 'type filename.txt', 'python script.py'"
+                f"You are a coding assistant with tool calling capabilities.{os_info}\n\n"
+                "CRITICAL: You MUST call tools to complete tasks. DO NOT just describe what to do.\n\n"
+                "Available tools:\n"
+                "- write_file: Create files with code\n"
+                "- run_command: Execute shell commands\n\n"
+                "When asked to create a program:\n"
+                "1. Immediately call write_file with the filename and complete code\n"
+                "2. Immediately call run_command to execute it (e.g., 'python filename.py')\n"
+                "3. Report the results\n\n"
+                "WRONG: Saying 'use write_file...' or 'run python...'\n"
+                "RIGHT: Actually calling the write_file and run_command tools\n\n"
+                "For Windows, use commands like: 'python script.py', 'dir', 'type file.txt'"
             )
         elif 'llama' in model_base:
             # Llama works well with more detailed instructions
@@ -328,8 +335,9 @@ Type 'quit' to exit.
                 continue
 
             # No tool calls in proper format, check if the message contains JSON tool calls
+            # ONLY do this on the first iteration to avoid parsing explanatory text as tool calls
             message = current_response.message
-            if message and message.content:
+            if message and message.content and iteration == 1:
                 content = message.content.strip()
                 tool_calls_found = False
 
