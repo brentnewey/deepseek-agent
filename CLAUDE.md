@@ -32,8 +32,11 @@ mypy src/
 
 ### Running the Agent
 ```bash
-# Start interactive chat
+# Start interactive chat (basic mode)
 deepseek-agent chat
+
+# Start with tool calling enabled (recommended)
+deepseek-agent chat --tools --model llama3.1
 
 # With specific workspace
 deepseek-agent chat --workspace /path/to/project
@@ -42,7 +45,7 @@ deepseek-agent chat --workspace /path/to/project
 run_agent.bat
 
 # Run directly with Python
-python src/deepseek_agent/cli.py chat
+python src/deepseek_agent/cli.py chat --tools
 ```
 
 ## Architecture
@@ -68,9 +71,25 @@ python src/deepseek_agent/cli.py chat
 ### Key Design Patterns
 
 - **Workspace Isolation**: All file operations are restricted to a designated workspace directory
+- **Tool Calling**: LLM can autonomously use tools (write_file, run_command, read_file, etc.)
 - **Streaming Responses**: Uses async generators for real-time model output
 - **Natural Language Commands**: Supports both structured commands and natural language requests
 - **Safety First**: Validates all paths and respects .gitignore patterns
+
+### Tool Calling System
+
+The agent supports two modes:
+1. **Basic Mode**: Manual commands and simple prompting
+2. **Tool Mode**: LLM autonomously uses tools to complete tasks
+
+Tool definitions are in `src/deepseek_agent/tools/tool_definitions.py`:
+- write_file: Create/modify files
+- read_file: Read file contents
+- list_directory: Browse directories
+- run_command: Execute shell commands
+- find_files: Search for files
+
+Compatible models: llama3.1, mistral-nemo, firefunction-v2, command-r
 
 ### Test Structure
 

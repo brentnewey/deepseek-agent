@@ -12,10 +12,22 @@ class Message(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    message: Message
+    message: Optional[Message] = None
     done: bool
     created_at: Optional[str] = None
     model: Optional[str] = None
+    # Support for tool calls
+    tool_calls: Optional[List[Dict[str, Any]]] = None
+
+    def __init__(self, **data):
+        # Handle tool calls in message
+        if 'message' in data and isinstance(data['message'], dict):
+            if 'tool_calls' in data['message']:
+                data['tool_calls'] = data['message'].get('tool_calls')
+            # Convert message dict to Message object if needed
+            if 'role' in data['message'] and 'content' in data['message']:
+                data['message'] = Message(**data['message'])
+        super().__init__(**data)
 
 
 class DeepSeekClient:
@@ -62,6 +74,9 @@ class DeepSeekClient:
                     if self._matches_target_model(model_entry):
                         return True
             return False
+        except (httpx.ConnectError, httpx.TimeoutException):
+            # Ollama service not running
+            return False
         except Exception:
             return False
     
@@ -107,7 +122,8 @@ class DeepSeekClient:
         stream: bool = True,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[ChatResponse, None]:
         """Send chat messages to DeepSeek model"""
         
@@ -115,10 +131,10 @@ class DeepSeekClient:
         formatted_messages = []
         if system_prompt:
             formatted_messages.append({"role": "system", "content": system_prompt})
-        
+
         for msg in messages:
             formatted_messages.append({"role": msg.role, "content": msg.content})
-        
+
         # Prepare request
         request_data = {
             "model": self.model,
@@ -128,28 +144,45 @@ class DeepSeekClient:
                 "temperature": temperature,
             }
         }
-        
+
         if max_tokens:
             request_data["options"]["num_predict"] = max_tokens
-        
+
+        # Add tools if provided
+        if tools:
+            request_data["tools"] = tools
+
         # Send request
-        async with self.client.stream(
-            "POST",
-            f"{self.host}/api/chat",
-            json=request_data
-        ) as response:
+        if stream:
+            # Streaming mode
+            async with self.client.stream(
+                "POST",
+                f"{self.host}/api/chat",
+                json=request_data
+            ) as response:
+                if response.status_code != 200:
+                    error_text = await response.aread()
+                    raise Exception(f"API error: {response.status_code} - {error_text}")
+
+                async for line in response.aiter_lines():
+                    if line.strip():
+                        try:
+                            data = json.loads(line)
+                            yield ChatResponse(**data)
+                        except Exception as e:
+                            print(f"Error parsing response: {e}")
+                            continue
+        else:
+            # Non-streaming mode - single response
+            response = await self.client.post(
+                f"{self.host}/api/chat",
+                json=request_data
+            )
             if response.status_code != 200:
-                error_text = await response.aread()
-                raise Exception(f"API error: {response.status_code} - {error_text}")
-            
-            async for line in response.aiter_lines():
-                if line.strip():
-                    try:
-                        data = json.loads(line)
-                        yield ChatResponse(**data)
-                    except Exception as e:
-                        print(f"Error parsing response: {e}")
-                        continue
+                raise Exception(f"API error: {response.status_code} - {response.text}")
+
+            data = response.json()
+            yield ChatResponse(**data)
     
     async def generate_code(
         self,
@@ -159,8 +192,15 @@ class DeepSeekClient:
     ) -> AsyncGenerator[str, None]:
         """Generate code using DeepSeek"""
         
-        system_prompt = """You are an expert software engineer. Generate clean, efficient, and well-documented code.
-Focus on best practices, proper error handling, and maintainable solutions."""
+        system_prompt = """You are an expert software engineer who creates working code files.
+
+When asked to generate code:
+1. Create complete, runnable code (not just snippets)
+2. Include proper error handling and edge cases
+3. Add helpful comments explaining key parts
+4. Make the code self-contained and ready to execute
+
+Always provide the COMPLETE file content that can be saved and run immediately."""
         
         if language:
             system_prompt += f" The code should be in {language}."

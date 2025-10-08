@@ -16,6 +16,7 @@ from rich.spinner import Spinner
 
 from deepseek_agent.model.client import DeepSeekClient, Message
 from deepseek_agent.tools.file_ops import FileOperations
+from deepseek_agent.utils import ensure_ollama_running, get_ollama_install_instructions
 
 app = typer.Typer(help="Local coding agent powered by DeepSeek models")
 console = Console()
@@ -30,9 +31,20 @@ class AgentCLI:
         self.file_ops = FileOperations(str(self.workspace))
         self.conversation_history = []
         self.system_prompt = (
-            "You are DeepSeek Agent, a local coding assistant. Use shell commands to inspect and modify the workspace when helpful."
-            " Ask the user to run shell commands by providing the exact `! <command>` they should execute."
-            " Prefer concise plans, explain why commands are needed, and avoid destructive actions unless explicitly approved."
+            "You are DeepSeek Agent, a local coding assistant with file operation capabilities."
+            "\n\nAVAILABLE COMMANDS YOU CAN SUGGEST:"
+            "\n- `write <file_path>` - Create or overwrite a file (you provide the content)"
+            "\n- `read <file_path>` - Read and display file content"
+            "\n- `ls [directory]` - List directory contents"
+            "\n- `find <pattern>` - Find files matching pattern"
+            "\n- `! <command>` - Run shell commands (like python, npm, etc.)"
+            "\n\nWHEN ASKED TO CREATE CODE:"
+            "\n1. First suggest using `write <filename>` to create the file"
+            "\n2. Provide the complete file content"
+            "\n3. Then suggest running it with `! python <filename>` or appropriate command"
+            "\n\nExample: If asked to create fizzbuzz, say:"
+            "\n'I'll create a fizzbuzz program. Use `write fizzbuzz.py` and I'll provide the content.'"
+            "\nThen provide the full code for the user to save."
         )
 
     def _resolve_directory_alias(self, query: str) -> str:
@@ -119,8 +131,19 @@ class AgentCLI:
 
     async def setup_model(self) -> DeepSeekClient:
         """Setup and verify DeepSeek model"""
+        # First ensure Ollama is running
+        console.print("Checking Ollama service...", style="blue")
+        success, message = await ensure_ollama_running()
+
+        if not success:
+            console.print(f"ERROR: {message}", style="red")
+            console.print(get_ollama_install_instructions(), style="yellow")
+            raise typer.Exit(code=1)
+
+        console.print(f"Ollama service ready: {message}", style="green")
+
         client = DeepSeekClient(model=self.model)
-        
+
         console.print(f"Checking {self.model} availability...", style="blue")
 
         if not await client.check_model_availability():
@@ -259,6 +282,44 @@ class AgentCLI:
                 tool_messages.append(tool_output)
 
         # File operations
+        if command_lower.startswith("write "):
+            file_path = command[6:].strip()
+            if not file_path:
+                console.print("Usage: write <file_path>", style="yellow")
+                return True
+
+            # Ask for multiline content
+            console.print(f"Creating file: {file_path}", style="blue")
+            console.print("Enter the content (type 'EOF' on a new line when done):", style="yellow")
+
+            lines = []
+            while True:
+                line = Prompt.ask("")
+                if line == "EOF":
+                    break
+                lines.append(line)
+
+            content = "\n".join(lines)
+
+            try:
+                self.file_ops.write_file(file_path, content)
+                console.print(f"✓ File created: {file_path}", style="green")
+
+                # Suggest running the file if it's a script
+                if file_path.endswith(('.py', '.js', '.sh', '.bat')):
+                    ext = Path(file_path).suffix
+                    run_cmd = {
+                        '.py': 'python',
+                        '.js': 'node',
+                        '.sh': 'bash',
+                        '.bat': ''
+                    }.get(ext, '')
+                    if run_cmd:
+                        console.print(f"\nTo run this file, use: `! {run_cmd} {file_path}`", style="cyan")
+            except Exception as e:
+                console.print(f"ERROR: Failed to write file: {e}", style="red")
+            return True
+
         if command_lower.startswith("read "):
             file_path = command[5:].strip()
             if not file_path:
@@ -306,8 +367,9 @@ class AgentCLI:
 ## Available Commands
 
 **File Operations:**
+- `write <file>` - Create or overwrite a file (agent will provide content)
 - `read <file>` - Read and display file content
-- `ls [dir]` - List directory contents  
+- `ls [dir]` - List directory contents
 - `find <pattern>` - Find files matching pattern
 
 **Code Operations:**
@@ -379,7 +441,20 @@ Just type any question or request to chat with DeepSeek!
             return True
 
         # General chat
-        self.conversation_history.append(Message(role="user", content=command))
+        # Check if this looks like a code generation request
+        code_keywords = ['create', 'write', 'make', 'build', 'implement', 'generate', 'code', 'program', 'script', 'function', 'class', 'fizz', 'buzz']
+        is_code_request = any(keyword in command_lower for keyword in code_keywords)
+
+        # Enhance the prompt if it's a code request
+        enhanced_command = command
+        if is_code_request and 'file' not in command_lower:
+            enhanced_command = (
+                f"{command}\n\n"
+                "IMPORTANT: Suggest using the `write <filename>` command to create a file, "
+                "then provide the complete file content that can be saved and executed."
+            )
+
+        self.conversation_history.append(Message(role="user", content=enhanced_command))
         for tool_msg in tool_messages:
             self.conversation_history.append(Message(role="assistant", content=tool_msg))
 
@@ -401,9 +476,14 @@ Just type any question or request to chat with DeepSeek!
         """Run interactive CLI session"""
         console.print(Panel.fit(
             " DeepSeek Agent v0.1.0\n"
-            f"Your local coding assistant powered by {self.model}\\n\\n"
-            f"Working directory: {self.workspace}\n"
-            "Type 'help' for commands or just chat naturally!\nUse '! <command>' to run shell commands.",
+            f"Your local coding assistant powered by {self.model}\n\n"
+            f"Working directory: {self.workspace}\n\n"
+            "Quick Commands:\n"
+            "  • write <file> - Create a new file\n"
+            "  • read <file> - View file contents\n"
+            "  • ! <command> - Run shell commands\n"
+            "  • help - Show all commands\n\n"
+            "💡 Tip: Ask me to create any code and I'll help you save it to a file!",
             title="Welcome",
             border_style="green"
         ))
@@ -426,11 +506,17 @@ Just type any question or request to chat with DeepSeek!
 @app.command()
 def chat(
     workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    model: str = typer.Option("deepseek-v2.5", "--model", "-m", help="DeepSeek model to use")
+    model: str = typer.Option("deepseek-v2.5", "--model", "-m", help="DeepSeek model to use"),
+    tools: bool = typer.Option(False, "--tools", help="Enable tool calling (requires compatible model)")
 ):
     """Start interactive chat session with DeepSeek Agent"""
-    cli = AgentCLI(workspace, model=model)
-    asyncio.run(cli.run_interactive())
+    if tools:
+        from deepseek_agent.cli_with_tools import ToolAgentCLI
+        cli = ToolAgentCLI(workspace, model=model)
+        asyncio.run(cli.run_interactive())
+    else:
+        cli = AgentCLI(workspace, model=model)
+        asyncio.run(cli.run_interactive())
 
 
 @app.command()
